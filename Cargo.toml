@@ -1,0 +1,30 @@
+[package]
+name = "emancipated"
+version = "0.1.0-dev"
+edition = "2021"
+
+readme = "./README.md"
+license = "BSD-3-Clause"
+description = "A certain tools to get something from a specific website to make it free from their platform."
+
+[dependencies]
+# Main dependencies
+tokio = { version = "1.40.0", features = ["full"] }
+serde = { version = "1.0.210", features = ["derive"] }
+serde_json = "1.0.128"
+time = "0.3.36"
+
+# AES, RSA, etc
+rsa = { version = "0.9.6", features = ["sha2"] }
+rand = "0.8.5"
+base64 = "0.22.1"
+aes-gcm = "0.10.3"
+cbc = "0.1.2"
+aes = "0.8.4"
+
+# Networking and Image
+reqwest = { version = "0.12.7", features = ["json", "http2"] }
+image = "0.25.2"
+
+# CLI stuff
+directories = "5.0.1"
