@@ -18,13 +18,6 @@ pub(crate) static BASE_HOST: LazyLock<String> = LazyLock::new(|| {
 
     String::from_utf8(decoded).expect("Failed to convert BASE_HOST to String")
 });
-static BASE_URL: LazyLock<String> = LazyLock::new(|| {
-    let decoded = general_purpose::STANDARD
-        .decode("aHR0cHM6Ly9lbWFxaS5jb20=")
-        .expect("Failed to decode BASE_URL");
-
-    String::from_utf8(decoded).expect("Failed to convert BASE_URL to String")
-});
 static API_URL: LazyLock<String> = LazyLock::new(|| {
     let decoded = general_purpose::STANDARD
         .decode("aHR0cHM6Ly9hcGkuZW1hcWkuY29tL2dyYXBocWw=")
@@ -104,7 +97,6 @@ pub enum ClientError {
     Reqwest(reqwest::Error),
     Serde(serde_json::Error),
     DetailedSerde(DetailedSerdeError),
-    TokenRefresh(String),
     RSA(RSAError),
     Image(ImageError),
     GraphQLError(GraphQLResponseError),
@@ -145,7 +137,6 @@ impl std::fmt::Display for ClientError {
         match self {
             Self::Reqwest(e) => write!(f, "Reqwest Error: {}", e),
             Self::Serde(e) => write!(f, "Serde Error: {}", e),
-            Self::TokenRefresh(e) => write!(f, "Token Refresh Error: {}", e),
             Self::RSA(e) => write!(f, "RSA Error: {}", e),
             Self::Image(e) => write!(f, "Image Error: {}", e),
             Self::GraphQLError(e) => write!(f, "GraphQL Error: {}", e),
@@ -167,7 +158,6 @@ impl std::fmt::Debug for ClientError {
         match self {
             Self::Reqwest(e) => write!(f, "Reqwest Error: {}", e),
             Self::Serde(e) => write!(f, "Serde Error: {}", e),
-            Self::TokenRefresh(e) => write!(f, "Token Refresh Error: {}", e),
             Self::RSA(e) => write!(f, "RSA Error: {}", e),
             Self::Image(e) => write!(f, "Image Error: {}", e),
             Self::GraphQLError(e) => write!(f, "GraphQL Error: {}", e),
@@ -184,6 +174,7 @@ impl std::fmt::Debug for ClientError {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Client {
     client: reqwest::Client,
     config: Config,
@@ -234,6 +225,10 @@ impl Client {
 
     pub fn get_config(&self) -> &Config {
         &self.config
+    }
+
+    pub fn get_private_key(&self) -> &rsa::RsaPrivateKey {
+        &self.priv_key
     }
 
     /// Refresh the token of the client.
@@ -474,11 +469,11 @@ impl Client {
 
     pub async fn get_contents(
         &mut self,
-        id: impl Into<String>,
+        slug: impl Into<String>,
         volume: i32,
     ) -> Result<Contents, ClientError> {
         let query = r#"query getMangaContents($comicId: String!, $volumeNumber: Int!) {
-            manga(comicId:$comicId, volumeNumber:$volumeNumber) {
+            manga(comicSlug:$comicId, volumeNumber:$volumeNumber) {
                 contents {
                     episodes {
                         episodeNumber
@@ -492,7 +487,7 @@ impl Client {
             }
         }"#;
 
-        let comic_id: String = id.into();
+        let comic_id: String = slug.into();
 
         let mut variables: HashMap<String, serde_json::Value> = HashMap::new();
         variables.insert("comicId".to_string(), serde_json::Value::String(comic_id));
@@ -525,6 +520,24 @@ impl Client {
         let response = self.query::<UserInfoQuery>(query, HashMap::new()).await?;
 
         Ok(response.data)
+    }
+
+    pub async fn download_image(&self, url: impl Into<String>) -> Result<Vec<u8>, ClientError> {
+        let url_s: String = url.into();
+
+        // New client
+        let client = reqwest::Client::builder()
+            .http2_adaptive_window(true)
+            .user_agent(FF_UA)
+            .build()?;
+
+        let request = client.get(&url_s).send().await?.error_for_status()?;
+
+        // Get the bytes
+        let bytes = request.bytes().await?;
+
+        // Return the decrypted bytes
+        Ok(bytes.to_vec())
     }
 
     pub async fn login(

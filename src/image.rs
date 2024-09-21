@@ -1,5 +1,7 @@
+use std::io::Write;
+
 use aes::cipher::{BlockDecryptMut, KeyIvInit};
-use aes_gcm::{aead::Aead, Aes256Gcm, AesGcm, KeyInit};
+use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit};
 
 type PKCS7128CbcDec = cbc::Decryptor<aes::Aes128>;
 
@@ -38,22 +40,36 @@ impl std::fmt::Debug for ImageError {
     }
 }
 
-pub(crate) fn decrypt_image(
-    image: &[u8],
-    aes_key: &[u8],
-) -> Result<image::DynamicImage, ImageError> {
-    let decrypted = decrypt_data(image, aes_key)?;
-
-    let read_img = image::load_from_memory(&decrypted)?;
-    Ok(read_img)
-}
-
 fn decrypt_data(image: &[u8], aes_key: &[u8]) -> Result<Vec<u8>, ImageError> {
     if image[0] == 2 {
         decrypt_with_aes_gcm(image, aes_key)
     } else {
         decrypt_with_aes_cbc(image, aes_key)
     }
+}
+
+pub(crate) fn load_and_save_image(
+    image: &[u8],
+    aes_key: &[u8],
+    target_dir: &std::path::Path,
+) -> Result<(), ImageError> {
+    let decrypted = decrypt_data(image, aes_key)?;
+    let extension = image::guess_format(&decrypted).unwrap_or(image::ImageFormat::Png);
+
+    // Try loading the image
+    image::load_from_memory(&decrypted)?;
+
+    // Save the image
+    // Path is already name but without extension, so we add the extension
+    let ext_str = extension.extensions_str()[0];
+    let path = target_dir.with_extension(ext_str);
+
+    // Open the file and write the image
+    let file = std::fs::File::create(&path)?;
+    let mut writer = std::io::BufWriter::new(file);
+    writer.write_all(&decrypted)?;
+
+    Ok(())
 }
 
 fn decrypt_with_aes_gcm(image: &[u8], aes_key: &[u8]) -> Result<Vec<u8>, ImageError> {
@@ -68,14 +84,6 @@ fn decrypt_with_aes_gcm(image: &[u8], aes_key: &[u8]) -> Result<Vec<u8>, ImageEr
 }
 
 fn decrypt_with_aes_cbc(image: &[u8], aes_key: &[u8]) -> Result<Vec<u8>, ImageError> {
-    // # AES-CBC
-    // iv = encrypted_image[0:16]
-    // ciphertext = encrypted_image[16:]
-    // cipher = Cipher(algorithms.AES(aes_key), modes.CBC(iv))
-    // decryptor = cipher.decryptor()
-    // unpadder = sym_padding.PKCS7(128).unpadder()
-    // padded_data = decryptor.update(ciphertext) + decryptor.finalize()
-    // decrypted_image = unpadder.update(padded_data) + unpadder.finalize()
     let iv = &image[0..16];
     let mut ciphertext = image[16..].to_vec();
     let cipher = PKCS7128CbcDec::new(aes_key.into(), iv.into());

@@ -76,7 +76,7 @@ async fn entrypoint(cli: EmancipatedCli) -> Result<ExitCode, ClientError> {
             slug,
             volume,
             parallel,
-        } => 1,
+        } => commands::download::manga_download(&mut client, &t, slug, volume, parallel).await,
         cli::EmancipatedCommands::Info { slug } => {
             commands::manga::manga_info(&mut client, &t, slug).await
         }

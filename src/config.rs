@@ -2,7 +2,7 @@ use std::{io::Write, path::PathBuf};
 
 use directories::BaseDirs;
 use rsa::{RsaPrivateKey, RsaPublicKey};
-use serde::{ser, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     kp::{self, hash_b64},
@@ -45,10 +45,6 @@ impl Config {
 
     pub fn set_refresh_token(&mut self, refresh_token: impl Into<String>) {
         self.refresh_token = refresh_token.into();
-    }
-
-    pub fn expires_at(&self) -> i64 {
-        self.expires_at
     }
 
     pub fn set_expires_at(&mut self, expires_at: i64) {

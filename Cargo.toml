@@ -13,6 +13,7 @@ tokio = { version = "1.40.0", features = ["full"] }
 serde = { version = "1.0.210", features = ["derive"] }
 serde_json = "1.0.128"
 time = "0.3.36"
+futures = "0.3.30"
 
 # AES, RSA, etc
 rsa = { version = "0.9.6", features = ["sha2"] }

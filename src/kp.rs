@@ -3,9 +3,7 @@ use std::path::Path;
 use base64::{engine::general_purpose, Engine as _};
 use rsa::pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey};
 use rsa::sha2::Sha256;
-use rsa::{
-    pkcs1::EncodeRsaPublicKey, pkcs8::DecodePublicKey, BigUint, RsaPrivateKey, RsaPublicKey,
-};
+use rsa::{pkcs8::DecodePublicKey, RsaPrivateKey, RsaPublicKey};
 
 pub(crate) enum RSAError {
     Io(std::io::Error),

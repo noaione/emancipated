@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Image {
-    url: String,
+    pub url: String,
     height: u32,
 }
 
