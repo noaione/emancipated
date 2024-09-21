@@ -45,6 +45,8 @@ pub(crate) async fn manga_download(
             match kp::hash_to_aes_key(client.get_private_key(), &contents.hash) {
                 Ok(aes_key) => {
                     // Download all the images
+                    console.log(format!("AES Key generated successfully: {:?}", &aes_key));
+                    console.log(format!("Original AES hash: {}", &contents.hash));
                     for episode in contents.episodes.iter() {
                         let ep_dir =
                             get_output_directory(&slug, volume, Some(episode.episode), true);
@@ -182,7 +184,7 @@ async fn actual_downloader(
     progress: Arc<indicatif::ProgressBar>,
 ) -> Result<(), ClientError> {
     if console.is_debug() {
-        console.log(format!(
+        console.log(cformat!(
             "   Downloading <m,s>{}</> to <m,s>{}</>...",
             &node.url,
             path.display()

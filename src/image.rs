@@ -1,8 +1,12 @@
 use std::io::Write;
 
-use aes::cipher::{BlockDecryptMut, KeyIvInit};
-use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit};
+use aes::{
+    cipher::{consts::U16, BlockDecryptMut, KeyIvInit},
+    Aes256,
+};
+use aes_gcm::{aead::Aead, AesGcm, KeyInit};
 
+type Aes256Gcm16 = AesGcm<Aes256, U16>;
 type PKCS7128CbcDec = cbc::Decryptor<aes::Aes128>;
 
 pub enum ImageError {
@@ -73,8 +77,8 @@ pub(crate) fn load_and_save_image(
 }
 
 fn decrypt_with_aes_gcm(image: &[u8], aes_key: &[u8]) -> Result<Vec<u8>, ImageError> {
-    let key = aes_gcm::Key::<Aes256Gcm>::from_slice(aes_key);
-    let cipher = Aes256Gcm::new(&key);
+    let key = aes_gcm::Key::<Aes256Gcm16>::from_slice(aes_key);
+    let cipher = Aes256Gcm16::new(&key);
 
     let nonce = &image[2..18];
     let ciphertext = &image[18..];
