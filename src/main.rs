@@ -80,7 +80,10 @@ async fn entrypoint(cli: EmancipatedCli) -> Result<ExitCode, ClientError> {
         cli::EmancipatedCommands::Info { slug } => {
             commands::manga::manga_info(&mut client, &t, slug).await
         }
-        cli::EmancipatedCommands::Purchased => 1,
+        cli::EmancipatedCommands::Purchased => {
+            t.warn("Purchased command not implemented yet!");
+            1
+        }
         cli::EmancipatedCommands::Search { query } => {
             commands::manga::manga_search(&mut client, &t, query).await
         }
