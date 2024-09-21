@@ -1,0 +1,180 @@
+name: CI
+on:
+  push:
+    branches:
+      - master
+      - develop
+    paths-ignore:
+      - 'README.md'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.vscode/**'
+    tags:
+      - v*
+  pull_request:
+    branches:
+      - master
+      - develop
+    paths-ignore:
+      - 'README.md'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.vscode/**'
+  merge_group:
+
+env:
+  CARGO_TERM_COLOR: always
+  PKG_CONFIG_SYSROOT_DIR: /
+permissions:
+  contents: write
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    if: ${{ !startsWith(github.event.head_commit.message, 'docs:') || !contains(github.event.head_commit.message, 'skip ci') }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@9a9194f87191a7e9055e3e9b95b8cfb13023bb08
+        with:
+          submodules: 'true'
+
+      - name: Rustup stable
+        run: |
+          rustup update stable
+
+      - name: Setup rust cache
+        uses: Swatinem/rust-cache@9bdad043e88c75890e36ad3bbc8d27f0090dd609
+        with:
+          prefix-key: "${{ runner.os }}-emancipated-rust"
+
+      - name: Test
+        run: cargo test --verbose --all
+
+  build:
+    needs: tests
+    strategy:
+      matrix:
+        os:
+          # GNU Linux (x64)
+          - [ubuntu-24.04, x86_64-unknown-linux-gnu]
+          # macOS Intel (x64)
+          - [macos-13, x86_64-apple-darwin]
+          # macOS Apple Silicon (ARM64)
+          - [macos-14, aarch64-apple-darwin]
+          # Windows Server 2022 (x64)
+          - [windows-2022, x86_64-pc-windows-msvc]
+      fail-fast: false
+    
+    runs-on: ${{ matrix.os[0] }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@9a9194f87191a7e9055e3e9b95b8cfb13023bb08
+
+      - name: Rust Target
+        run: |
+          rustup update stable
+          rustup target add ${{ matrix.os[1] }}
+
+      - name: Setup rust cache
+        uses: Swatinem/rust-cache@9bdad043e88c75890e36ad3bbc8d27f0090dd609
+        with:
+          prefix-key: "${{ runner.os }}-${{ matrix.os[1] }}-emancipated-build-rust"
+
+      - name: Build (Nightly)
+        if: startsWith(github.ref, 'refs/tags/v') != true
+        run: |
+          cargo build --release --verbose --all --target ${{ matrix.os[1] }}
+        shell: bash
+
+      - name: Permissions (Nightly)
+        if: startsWith(github.ref, 'refs/tags/v') != true && matrix.os[0] != 'windows-latest'
+        run: |
+          chmod +x target/${{ matrix.os[1] }}/release/emancipated
+        shell: bash
+
+      - name: Upload artifact
+        if: startsWith(github.ref, 'refs/tags/v') != true
+        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a
+        with:
+          name: emancipated-${{ matrix.os[1] }}
+          path: |
+            target/${{ matrix.os[1] }}/release/emancipated.exe
+            target/${{ matrix.os[1] }}/release/emancipated
+
+      - name: Build (Release)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          cargo build --release --verbose --all --target ${{ matrix.os[1] }}
+        shell: bash
+        env:
+          RELEASE: true
+
+      - name: Prepare release
+        if: matrix.os[0] != 'windows-latest' && startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          cd target/${{ matrix.os[1] }}/release
+          chmod +x emancipated
+          tar -czvf emancipated-${{ matrix.os[1] }}.tar.gz emancipated
+          mv emancipated-${{ matrix.os[1] }}.tar.gz ../../..
+          cd ../../..
+
+      - name: Prepare release (Win32)
+        if: matrix.os[0] == 'windows-latest' && startsWith(github.ref, 'refs/tags/v')
+        run: |
+          cd target/${{ matrix.os[1] }}/release
+          Compress-Archive -Path emancipated.exe -DestinationPath emancipated-${{ matrix.os[1] }}.zip
+          mv emancipated-${{ matrix.os[1] }}.zip ../../..
+          cd ../../..
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: emancipated-packages-${{ matrix.os[1] }}
+          path: |
+            emancipated-${{ matrix.os[1] }}.zip
+            emancipated-${{ matrix.os[1] }}.tar.gz
+
+  releases:
+    runs-on: ubuntu-latest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') && github.repository_owner == 'noaione'
+    permissions:
+      contents: write
+      discussions: write
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@9a9194f87191a7e9055e3e9b95b8cfb13023bb08
+
+      - name: Download artifacts
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
+        with:
+          path: emancipated-packages
+          pattern: emancipated-packages-*
+          merge-multiple: true
+
+      - name: Create changelog
+        id: prepare-change
+        run: |
+          python3 scripts/create_changelog.py
+          # Fetch git tag contents subject
+          VERSION_SUBJ=$(git tag -l --format='%(contents:subject)' ${{ github.ref }})
+          echo "version_subject=$VERSION_SUBJ" >> "$GITHUB_OUTPUT"
+        env:
+          VERSION: ${{ github.ref }}
+
+      - name: Release
+        uses: softprops/action-gh-release@9a28f2423fd7ba2781181bb13e8aba228027c4e9
+        with:
+          files: |
+            emancipated-packages/*
+          draft: false
+          prerelease: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+          body_path: CHANGELOG-GENERATED.md
+          name: ${{ steps.prepare-change.outputs.version_subject }}

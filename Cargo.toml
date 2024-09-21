@@ -37,3 +37,9 @@ supports-hyperlinks = "3.0.0"
 
 # Windows deps
 windows-sys = { version = "0.52.0", features = ["Win32_Foundation", "Win32_System_Console"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"

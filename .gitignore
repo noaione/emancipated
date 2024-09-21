@@ -7,3 +7,5 @@ schema.graphql
 
 # My logging
 *.har
+
+CHANGELOG-GENERATED.md
