@@ -17,11 +17,11 @@ impl std::fmt::Display for GraphQLResponseError {
         if self.errors.is_empty() {
             writeln!(f, "No errors found")?;
         } else if self.errors.len() == 1 {
-            writeln!(f, "{}", self.errors[0].message)?;
+            writeln!(f, "{}", self.errors[0])?;
         } else {
             // print with numbering
             for (i, error) in self.errors.iter().enumerate() {
-                writeln!(f, "[{}] {}", i + 1, error.message)?;
+                writeln!(f, "[{}] {}", i + 1, error)?;
             }
         }
         Ok(())
@@ -32,7 +32,7 @@ impl std::fmt::Display for GraphQLResponseError {
 pub struct GraphQLError {
     pub message: String,
     pub locations: Vec<GraphQLErrorLocation>,
-    pub path: Vec<String>,
+    pub path: Vec<serde_json::Value>,
 }
 
 impl std::fmt::Display for GraphQLError {
@@ -51,7 +51,14 @@ impl std::fmt::Display for GraphQLError {
             )?;
         }
         if !self.path.is_empty() {
-            write!(f, " in {}", self.path.join("."))?;
+            // stringify path and write it
+            let path_str = self
+                .path
+                .iter()
+                .map(|v| v.to_string())
+                .collect::<Vec<String>>()
+                .join(".");
+            write!(f, " in {}", path_str)?;
         }
         // newline
         writeln!(f)
