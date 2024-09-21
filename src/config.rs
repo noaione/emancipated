@@ -4,7 +4,10 @@ use directories::BaseDirs;
 use rsa::{RsaPrivateKey, RsaPublicKey};
 use serde::{ser, Deserialize, Serialize};
 
-use crate::kp::{self, hash_b64};
+use crate::{
+    kp::{self, hash_b64},
+    term::ConsoleChoice,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -164,6 +167,71 @@ pub(crate) fn find_any_config() -> Vec<Config> {
     }
 
     configs
+}
+
+pub(crate) fn get_config(email: impl Into<String>) -> Option<Config> {
+    let email = email.into();
+    let user_path = get_user_path();
+    let email_64 = hash_b64(&email);
+    let file_path = user_path.join(format!("config_{}.json", email_64));
+
+    if file_path.exists() {
+        let file = std::fs::File::open(file_path).unwrap();
+        let config: Config = serde_json::from_reader(file).unwrap();
+        return Some(config);
+    }
+
+    None
+}
+
+pub(crate) fn select_single_account(
+    email: Option<&str>,
+    term: &crate::term::Terminal,
+) -> Option<Config> {
+    if let Some(email) = email {
+        let config = get_config(email);
+
+        if let Some(config) = config {
+            return Some(config.clone());
+        }
+
+        term.warn(&format!("Account ID {} not found!", email));
+
+        return None;
+    }
+
+    let all_configs = find_any_config();
+    let all_choices: Vec<ConsoleChoice> = all_configs
+        .iter()
+        .map(|c| ConsoleChoice {
+            name: c.email().to_string(),
+            value: c.email().to_string(),
+        })
+        .collect();
+
+    if all_configs.is_empty() {
+        term.warn("No accounts found!");
+        return None;
+    }
+
+    // only 1? return
+    if all_configs.len() == 1 {
+        return Some(all_configs[0].clone());
+    }
+
+    let selected = term.choice("Select an account:", all_choices);
+    match selected {
+        Some(selected) => {
+            let config = all_configs
+                .iter()
+                .find(|c| c.email() == selected.name)
+                .unwrap()
+                .clone();
+
+            Some(config)
+        }
+        None => None,
+    }
 }
 
 pub(crate) fn save_config(config: &Config) {

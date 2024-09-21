@@ -3,9 +3,11 @@ use std::fmt::Debug;
 
 pub mod common;
 pub mod manga;
+pub mod users;
 
 pub use common::*;
 pub use manga::*;
+pub use users::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphQLResponse<T> {
@@ -41,4 +43,11 @@ pub struct ComicContents {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComicContentsQuery {
     pub manga: ComicContents,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserInfoQuery {
+    pub user: User,
+    #[serde(rename = "userProfile")]
+    pub profile: UserProfile,
 }

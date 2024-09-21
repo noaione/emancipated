@@ -1,5 +1,9 @@
 /target
 
+# Dumped GQL Schema
 schema.json
 schema.gql
 schema.graphql
+
+# My logging
+*.har

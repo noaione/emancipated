@@ -5,35 +5,53 @@ use super::Image;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Comic {
     #[serde(rename = "comicId")]
-    comic_id: String,
-    slug: String,
-    title: String,
-    cover: Image,
+    pub comic_id: String,
+    pub slug: String,
+    pub title: String,
+    pub cover: Image,
     #[serde(rename = "noVolume")]
-    no_volume: bool,
+    pub no_volume: bool,
+    pub genres: Vec<ComicTag>,
+    pub metadata: ComicMetadata,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComicMetadata {
+    pub completed: Option<bool>,
+    pub creators: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComicTag {
+    #[serde(rename = "tagId")]
+    id: String,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContentEpisodes {
     #[serde(rename = "episodeNumber")]
-    episode: i32,
-    pages: Vec<Image>,
+    pub episode: i32,
+    pub pages: Vec<Image>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Contents {
-    episodes: Vec<ContentEpisodes>,
-    hash: String,
+    pub episodes: Vec<ContentEpisodes>,
+    pub hash: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Volume {
-    slug: String,
+    pub slug: String,
     #[serde(rename = "volumeNumber")]
-    number: i32,
-    name: String,
-    purchased: bool,
+    pub number: i32,
+    pub name: String,
+    pub purchased: bool,
     #[serde(rename = "readerSkipCover")]
-    reader_skip_cover: bool,
-    cover: Image,
+    pub reader_skip_cover: bool,
+    pub cover: Image,
+    #[serde(rename = "releasesAt")]
+    pub release_at: Option<String>,
+    pub price: Option<String>,
 }

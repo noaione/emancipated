@@ -3,14 +3,15 @@ use serde_json::json;
 use std::{collections::HashMap, fmt::Debug, sync::LazyLock};
 
 use crate::{
-    config::{save_config, Config},
+    config::{google_auth::VerifyPasswordResponseMinimal, save_config, Config},
+    image::ImageError,
     kp::{self, RSAError},
-    models::{Comic, ComicVolumes, Contents, GraphQLResponse},
+    models::{Comic, ComicVolumes, Contents, GraphQLResponse, GraphQLResponseError, UserInfoQuery},
 };
 
 const FF_UA: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0";
-static BASE_HOST: LazyLock<String> = LazyLock::new(|| {
+pub(crate) static BASE_HOST: LazyLock<String> = LazyLock::new(|| {
     let decoded = general_purpose::STANDARD
         .decode("ZW1hcWkuY29t")
         .expect("Failed to decode BASE_HOST");
@@ -47,11 +48,66 @@ static TOKEN_AUTH: LazyLock<String> = LazyLock::new(|| {
     String::from_utf8(decoded).expect("Failed to convert TOKEN_AUTH to String")
 });
 
+/// Error type that happens when parsing the response from the API
+///
+/// This is specifically for [`serde`] errors.
+///
+/// When formatted as a string, it will show the error message, status code, headers, and a JSON excerpt.
+pub struct DetailedSerdeError {
+    inner: serde_json::Error,
+    status_code: reqwest::StatusCode,
+    headers: reqwest::header::HeaderMap,
+    url: reqwest::Url,
+    raw_text: String,
+}
+
+impl DetailedSerdeError {
+    /// Create a new instance of the error
+    pub(crate) fn new(
+        inner: serde_json::Error,
+        status_code: reqwest::StatusCode,
+        headers: &reqwest::header::HeaderMap,
+        url: &reqwest::Url,
+        raw_text: impl Into<String>,
+    ) -> Self {
+        Self {
+            inner,
+            status_code,
+            headers: headers.clone(),
+            url: url.clone(),
+            raw_text: raw_text.into(),
+        }
+    }
+
+    /// Get the JSON excerpt from the raw text
+    ///
+    /// This will return a string that contains where the deserialization error happened.
+    ///
+    /// It will take 25 characters before and after the error position.
+    pub fn get_json_excerpt(&self) -> String {
+        let row_line = self.inner.line() - 1;
+        let split_lines = self.raw_text.split('\n').collect::<Vec<&str>>();
+
+        let position = self.inner.column();
+        let start_idx = position.saturating_sub(25);
+        let end_idx = position.saturating_add(25);
+
+        // Bound the start and end index
+        let start_idx = start_idx.max(0);
+        let end_idx = end_idx.min(split_lines[row_line].len());
+
+        split_lines[row_line][start_idx..end_idx].to_string()
+    }
+}
+
 pub enum ClientError {
     Reqwest(reqwest::Error),
     Serde(serde_json::Error),
+    DetailedSerde(DetailedSerdeError),
     TokenRefresh(String),
     RSA(RSAError),
+    Image(ImageError),
+    GraphQLError(GraphQLResponseError),
 }
 
 impl From<reqwest::Error> for ClientError {
@@ -72,6 +128,62 @@ impl From<RSAError> for ClientError {
     }
 }
 
+impl From<ImageError> for ClientError {
+    fn from(e: ImageError) -> Self {
+        Self::Image(e)
+    }
+}
+
+impl From<DetailedSerdeError> for ClientError {
+    fn from(e: DetailedSerdeError) -> Self {
+        Self::DetailedSerde(e)
+    }
+}
+
+impl std::fmt::Display for ClientError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Reqwest(e) => write!(f, "Reqwest Error: {}", e),
+            Self::Serde(e) => write!(f, "Serde Error: {}", e),
+            Self::TokenRefresh(e) => write!(f, "Token Refresh Error: {}", e),
+            Self::RSA(e) => write!(f, "RSA Error: {}", e),
+            Self::Image(e) => write!(f, "Image Error: {}", e),
+            Self::GraphQLError(e) => write!(f, "GraphQL Error: {}", e),
+            Self::DetailedSerde(e) => write!(
+                f,
+                "Serde Error: {}\nStatus Code: {}\nHeaders: {:?}\nURL: {}\nJSON excerpt: {}",
+                e.inner,
+                e.status_code,
+                e.headers,
+                e.url,
+                e.get_json_excerpt()
+            ),
+        }
+    }
+}
+
+impl std::fmt::Debug for ClientError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Reqwest(e) => write!(f, "Reqwest Error: {}", e),
+            Self::Serde(e) => write!(f, "Serde Error: {}", e),
+            Self::TokenRefresh(e) => write!(f, "Token Refresh Error: {}", e),
+            Self::RSA(e) => write!(f, "RSA Error: {}", e),
+            Self::Image(e) => write!(f, "Image Error: {}", e),
+            Self::GraphQLError(e) => write!(f, "GraphQL Error: {}", e),
+            Self::DetailedSerde(e) => write!(
+                f,
+                "Serde Error: {}\nStatus Code: {}\nHeaders: {:?}\nURL: {}\nJSON excerpt: {}",
+                e.inner,
+                e.status_code,
+                e.headers,
+                e.url,
+                e.get_json_excerpt()
+            ),
+        }
+    }
+}
+
 pub struct Client {
     client: reqwest::Client,
     config: Config,
@@ -80,7 +192,7 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new(config: &mut Config) -> Result<Self, ClientError> {
+    pub fn new(config: &mut Config, proxy: Option<reqwest::Proxy>) -> Result<Self, ClientError> {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::USER_AGENT,
@@ -93,8 +205,13 @@ impl Client {
 
         let client = reqwest::Client::builder()
             .http2_adaptive_window(true)
-            .default_headers(headers)
-            .build()?;
+            .default_headers(headers);
+
+        let client = match proxy {
+            Some(proxy) => client.proxy(proxy),
+            None => client,
+        }
+        .build()?;
 
         let (priv_key, pub_key) = if !config.has_key() {
             config.generate_key_pair()?
@@ -108,6 +225,15 @@ impl Client {
             priv_key,
             pub_key,
         })
+    }
+
+    /// Get the configuration of the client.
+    pub fn get_config_owned(&self) -> Config {
+        self.config.clone()
+    }
+
+    pub fn get_config(&self) -> &Config {
+        &self.config
     }
 
     /// Refresh the token of the client.
@@ -159,6 +285,8 @@ impl Client {
     where
         T: serde::de::DeserializeOwned + Debug + Clone,
     {
+        self.refresh_token().await?;
+
         let json_data = json!({
             "query": query.into(),
             "variables": variables,
@@ -179,11 +307,28 @@ impl Client {
             )
             .json(&json_data)
             .send()
-            .await?;
+            .await?
+            // since all graphql requests will be 200 OK, we need to check the response
+            .error_for_status()?;
 
-        let response = req.json::<GraphQLResponse<T>>().await?;
+        let status_code = req.status();
+        let headers = req.headers().clone();
+        let url = req.url().clone();
+        let text_data = req.text().await?;
 
-        Ok(response)
+        // Check for errors
+        match serde_json::from_str::<GraphQLResponseError>(&text_data) {
+            Ok(error_response) => {
+                return Err(ClientError::GraphQLError(error_response));
+            }
+            Err(_) => {}
+        }
+
+        // Actual response
+        let resp = serde_json::from_str::<GraphQLResponse<T>>(&text_data)
+            .map_err(|e| DetailedSerdeError::new(e, status_code, &headers, &url, text_data))?;
+
+        Ok(resp)
     }
 
     async fn query<T>(
@@ -194,6 +339,8 @@ impl Client {
     where
         T: serde::de::DeserializeOwned + Debug + Clone,
     {
+        self.refresh_token().await?;
+
         let json_data = json!({
             "query": query.into(),
             "variables": variables,
@@ -211,16 +358,31 @@ impl Client {
             )
             .json(&json_data)
             .send()
-            .await?;
+            .await?
+            // since all graphql requests will be 200 OK, we need to check the response
+            .error_for_status()?;
 
-        let response = req.json::<GraphQLResponse<T>>().await?;
+        let status_code = req.status();
+        let headers = req.headers().clone();
+        let url = req.url().clone();
+        let text_data = req.text().await?;
 
-        Ok(response)
+        // Check for errors
+        match serde_json::from_str::<GraphQLResponseError>(&text_data) {
+            Ok(error_response) => {
+                return Err(ClientError::GraphQLError(error_response));
+            }
+            Err(_) => {}
+        }
+
+        // Actual response
+        let resp = serde_json::from_str::<GraphQLResponse<T>>(&text_data)
+            .map_err(|e| DetailedSerdeError::new(e, status_code, &headers, &url, text_data))?;
+
+        Ok(resp)
     }
 
-    pub async fn search(&mut self, query: impl Into<String>) -> Result<Vec<Comic>, ClientError> {
-        self.refresh_token().await?;
-
+    pub async fn search(&mut self, keyword: impl Into<String>) -> Result<Vec<Comic>, ClientError> {
         let query = r#"query searchManga($query:String!) {
             search(input:{keyword:$query})  {
                 comicId
@@ -230,11 +392,19 @@ impl Client {
                     url
                     height
                 }
+                genres {
+                    name
+                    tagId
+                }
+                metadata {
+                    completed
+                    creators
+                }
                 noVolume
             }
         }"#;
 
-        let q_s: String = query.into();
+        let q_s: String = keyword.into();
 
         let variables: HashMap<String, String> = [("query", q_s)]
             .iter()
@@ -252,8 +422,6 @@ impl Client {
         &mut self,
         slug: impl Into<String>,
     ) -> Result<ComicVolumes, ClientError> {
-        self.refresh_token().await?;
-
         let query = r#"query getVolumes($slug:String!) {
             comicVolumes(comicSlug:$slug) {
                 comic {
@@ -265,6 +433,14 @@ impl Client {
                         height
                     }
                     noVolume
+                    genres {
+                        name
+                        tagId
+                    }
+                    metadata {
+                        completed
+                        creators
+                    }
                 }
                 volumes {
                     slug
@@ -272,6 +448,8 @@ impl Client {
                     name
                     purchased
                     readerSkipCover
+                    releasesAt
+                    price
                     cover {
                         height
                         url
@@ -299,8 +477,6 @@ impl Client {
         id: impl Into<String>,
         volume: i32,
     ) -> Result<Contents, ClientError> {
-        self.refresh_token().await?;
-
         let query = r#"query getMangaContents($comicId: String!, $volumeNumber: Int!) {
             manga(comicId:$comicId, volumeNumber:$volumeNumber) {
                 contents {
@@ -330,5 +506,58 @@ impl Client {
             .await?;
 
         Ok(response.data.manga.contents)
+    }
+
+    pub async fn get_user(&mut self) -> Result<UserInfoQuery, ClientError> {
+        let query = r#"query getUserInfo {
+            user {
+                coins
+                userId
+                deletedAt
+            }
+            userProfile {
+                userId
+                pronouns
+                dateOfBirth
+            }
+        }"#;
+
+        let response = self.query::<UserInfoQuery>(query, HashMap::new()).await?;
+
+        Ok(response.data)
+    }
+
+    pub async fn login(
+        email: impl Into<String>,
+        password: impl Into<String>,
+        proxy: Option<reqwest::Proxy>,
+    ) -> Result<VerifyPasswordResponseMinimal, ClientError> {
+        let email_s: String = email.into();
+        let password_s: String = password.into();
+
+        let json_data = json!({
+            "email": email_s,
+            "password": password_s,
+            "returnSecureToken": true,
+            "clientType": "CLIENT_TYPE_WEB",
+        });
+
+        let client = reqwest::Client::builder().http2_adaptive_window(true);
+        let client = match proxy {
+            Some(proxy) => client.proxy(proxy),
+            None => client,
+        }
+        .build()?;
+        let request = client
+            .post("https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword")
+            .header(reqwest::header::USER_AGENT, FF_UA)
+            .query(&[("key", TOKEN_AUTH.to_string())])
+            .json(&json_data)
+            .send()
+            .await?;
+
+        let response = request.json::<VerifyPasswordResponseMinimal>().await?;
+
+        Ok(response)
     }
 }

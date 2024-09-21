@@ -45,6 +45,30 @@ impl From<base64::DecodeError> for RSAError {
     }
 }
 
+impl std::fmt::Display for RSAError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RSAError::Io(e) => write!(f, "IO Error: {}", e),
+            RSAError::RSA(e) => write!(f, "RSA Error: {}", e),
+            RSAError::PKCS8(e) => write!(f, "PKCS8 Error: {}", e),
+            RSAError::SpkiPKCS8(e) => write!(f, "SPKI PKCS8 Error: {}", e),
+            RSAError::B64Decode(e) => write!(f, "Base64 Decode Error: {}", e),
+        }
+    }
+}
+
+impl std::fmt::Debug for RSAError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RSAError::Io(e) => write!(f, "IO Error: {}", e),
+            RSAError::RSA(e) => write!(f, "RSA Error: {}", e),
+            RSAError::PKCS8(e) => write!(f, "PKCS8 Error: {}", e),
+            RSAError::SpkiPKCS8(e) => write!(f, "SPKI PKCS8 Error: {}", e),
+            RSAError::B64Decode(e) => write!(f, "Base64 Decode Error: {}", e),
+        }
+    }
+}
+
 pub(crate) fn generate_key_pair() -> Result<(RsaPrivateKey, RsaPublicKey), RSAError> {
     // Generate Key-Pair of 2048 bits with 65537 exponent
     let mut rng = rand::thread_rng();

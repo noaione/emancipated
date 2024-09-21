@@ -12,6 +12,32 @@ pub enum ImageError {
     AESCBCUnpad(aes::cipher::block_padding::UnpadError),
 }
 
+impl std::fmt::Display for ImageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ImageError::Io(e) => write!(f, "IO Error: {}", e),
+            ImageError::Image(e) => write!(f, "Image Error: {}", e),
+            ImageError::RSA(e) => write!(f, "RSA Error: {}", e),
+            ImageError::AESGCM(e) => write!(f, "AES GCM Error: {}", e),
+            ImageError::AESLength(e) => write!(f, "AES Length Error: {}", e),
+            ImageError::AESCBCUnpad(e) => write!(f, "AES CBC Unpad Error: {}", e),
+        }
+    }
+}
+
+impl std::fmt::Debug for ImageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ImageError::Io(e) => write!(f, "IO Error: {}", e),
+            ImageError::Image(e) => write!(f, "Image Error: {}", e),
+            ImageError::RSA(e) => write!(f, "RSA Error: {}", e),
+            ImageError::AESGCM(e) => write!(f, "AES GCM Error: {}", e),
+            ImageError::AESLength(e) => write!(f, "AES Length Error: {}", e),
+            ImageError::AESCBCUnpad(e) => write!(f, "AES CBC Unpad Error: {}", e),
+        }
+    }
+}
+
 pub(crate) fn decrypt_image(
     image: &[u8],
     aes_key: &[u8],
