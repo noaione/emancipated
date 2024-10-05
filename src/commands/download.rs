@@ -28,8 +28,10 @@ pub(crate) async fn manga_download(
             console.error(cformat!("Failed to initiate download: <r,s>{}</>", e));
             1
         }
-        Ok(contents) => {
+        Ok(contents_data) => {
             save_config(client.get_config());
+
+            let contents = &contents_data.contents;
 
             if contents.episodes.is_empty() {
                 console.info("No episodes found!");
@@ -41,21 +43,35 @@ pub(crate) async fn manga_download(
                 contents.episodes.len(),
                 volume
             ));
+            let ep_dir = get_output_directory(&slug, volume, true);
+
+            // Download cover
+            console.info(cformat!("Downloading to <m,s>{}</>...", ep_dir.display()));
+            let cover_bytes = client
+                .download_image(&contents_data.volume.cover.url)
+                .await
+                .unwrap();
+
+            let cover_path = ep_dir.join("p000.jpg");
+            tokio::fs::write(&cover_path, &cover_bytes).await.unwrap();
 
             match kp::hash_to_aes_key(client.get_private_key(), &contents.hash) {
                 Ok(aes_key) => {
                     // Download all the images
                     console.log(format!("AES Key generated successfully: {:?}", &aes_key));
                     console.log(format!("Original AES hash: {}", &contents.hash));
-                    for episode in contents.episodes.iter() {
-                        let ep_dir =
-                            get_output_directory(&slug, volume, Some(episode.episode), true);
-
+                    for (episode_idx, episode) in contents.episodes.iter().enumerate() {
                         console.info(cformat!(
                             "  Downloading episode <m,s>{}</> for <m,s>{}</>...",
                             episode.episode,
                             &slug,
                         ));
+
+                        let prev_slice_count = if episode_idx == 0 {
+                            0usize
+                        } else {
+                            get_slice_image_count(&contents.episodes[..episode_idx])
+                        };
 
                         let progress = Arc::new(
                             console.make_progress(episode.pages.len() as u64, Some("Downloading")),
@@ -74,12 +90,14 @@ pub(crate) async fn manga_download(
                                     let key = aes_key.clone();
                                     let progress = Arc::clone(&progress);
 
+                                    let actual_page_idx = prev_slice_count + idx;
+
                                     tokio::spawn(async move {
                                         match actual_downloader(
                                             DownloadNode {
                                                 client: wrap_client,
                                                 url: image.url.clone(),
-                                                idx,
+                                                idx: actual_page_idx + 1,
                                                 key,
                                             },
                                             cnsl.clone(),
@@ -103,10 +121,12 @@ pub(crate) async fn manga_download(
                             futures::future::join_all(tasks).await;
                         } else {
                             for (idx, image) in episode.pages.iter().enumerate() {
+                                let actual_page_idx = prev_slice_count + idx;
+
                                 let node = DownloadNode {
                                     client: client.clone(),
                                     url: image.url.clone(),
-                                    idx,
+                                    idx: actual_page_idx + 1,
                                     key: aes_key.clone(),
                                 };
 
@@ -147,21 +167,12 @@ pub(crate) async fn manga_download(
     }
 }
 
-fn get_output_directory(
-    slug: &str,
-    volume: u32,
-    chapter: Option<i32>,
-    create_folder: bool,
-) -> PathBuf {
+fn get_output_directory(slug: &str, volume: u32, create_folder: bool) -> PathBuf {
     let cwd = std::env::current_dir().unwrap();
     let mut pathing = cwd.join("DOWNLOADS");
     pathing.push(slug);
 
     pathing.push(format!("v{:02}", volume));
-
-    if let Some(chapter) = chapter {
-        pathing.push(format!("c{:03}", chapter));
-    }
 
     if create_folder {
         std::fs::create_dir_all(&pathing).unwrap();
@@ -220,4 +231,8 @@ async fn actual_downloader(
             Err(err)
         }
     }
+}
+
+fn get_slice_image_count(prev_episodes: &[crate::models::ContentEpisodes]) -> usize {
+    prev_episodes.iter().map(|e| e.pages.len()).sum()
 }

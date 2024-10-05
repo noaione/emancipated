@@ -38,6 +38,7 @@ pub struct VolumesQuery {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComicContents {
     pub contents: Contents,
+    pub volume: Volume,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

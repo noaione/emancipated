@@ -6,7 +6,9 @@ use crate::{
     config::{google_auth::VerifyPasswordResponseMinimal, save_config, Config},
     image::ImageError,
     kp::{self, RSAError},
-    models::{Comic, ComicVolumes, Contents, GraphQLResponse, GraphQLResponseError, UserInfoQuery},
+    models::{
+        Comic, ComicContents, ComicVolumes, GraphQLResponse, GraphQLResponseError, UserInfoQuery,
+    },
 };
 
 const FF_UA: &str =
@@ -471,7 +473,7 @@ impl Client {
         &mut self,
         slug: impl Into<String>,
         volume: i32,
-    ) -> Result<Contents, ClientError> {
+    ) -> Result<ComicContents, ClientError> {
         let query = r#"query getMangaContents($comicId: String!, $volumeNumber: Int!) {
             manga(comicSlug:$comicId, volumeNumber:$volumeNumber) {
                 contents {
@@ -483,6 +485,19 @@ impl Client {
                         }
                     }
                     hash
+                }
+                volume {
+                    slug
+                    volumeNumber
+                    name
+                    purchased
+                    readerSkipCover
+                    releasesAt
+                    price
+                    cover {
+                        height
+                        url
+                    }
                 }
             }
         }"#;
@@ -500,7 +515,7 @@ impl Client {
             .query_protected::<crate::models::ComicContentsQuery>(query, variables)
             .await?;
 
-        Ok(response.data.manga.contents)
+        Ok(response.data.manga)
     }
 
     pub async fn get_user(&mut self) -> Result<UserInfoQuery, ClientError> {
